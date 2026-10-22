@@ -1,0 +1,56 @@
+# OIDC sub 프로브 — 토큰의 sub · aud · iss 와 claim 이름 목록만 로그에 찍는다(토큰 원문·서명은 찍지 않음).
+# 외부 액션을 쓰지 않는다(curl + python3 만). AWS 호출 없음. 토큰은 셸 변수와 python 환경변수로만 두고 어디에도 echo 하지 않는다
+# (`::add-mask::` 줄 자체가 로그에 값을 남기는지는 확인 못 했으므로 쓰지 않음 [미확인]).
+# 경우 셋: ① pull_request  ② 브랜치 push  ③ 환경을 참조하는 잡(보호 규칙 없는 `probe` 환경 — 처음 참조하면 자동 생성)
+name: oidc-sub-probe
+
+on:
+  pull_request:
+  push:
+    branches: [main, probe-branch]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  no-environment:
+    # pull_request 이벤트면 sub 가 pull_request 형, push 면 브랜치 형이어야 한다(옛 형식 기준 문서 예시).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print sub, aud, iss, claim names
+        run: |
+          set -eu
+          tok=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          TOK="$tok" python3 - <<'PY'
+          import os, json, base64
+          p = os.environ["TOK"].split(".")[1]
+          c = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))
+          print("event      =", os.environ.get("GITHUB_EVENT_NAME"))
+          print("sub        =", c.get("sub"))
+          print("aud        =", c.get("aud"))
+          print("iss        =", c.get("iss"))
+          print("claim names=", sorted(c))
+          PY
+
+  with-environment:
+    # 환경 이름 `probe` 를 처음 참조하면 보호 규칙·비밀 없는 환경이 자동 생성된다(공식 문서 문장).
+    runs-on: ubuntu-latest
+    environment: probe
+    steps:
+      - name: Print sub, aud, iss, claim names
+        run: |
+          set -eu
+          tok=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          TOK="$tok" python3 - <<'PY'
+          import os, json, base64
+          p = os.environ["TOK"].split(".")[1]
+          c = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))
+          print("event      =", os.environ.get("GITHUB_EVENT_NAME"))
+          print("sub        =", c.get("sub"))
+          print("aud        =", c.get("aud"))
+          print("iss        =", c.get("iss"))
+          print("claim names=", sorted(c))
+          PY
